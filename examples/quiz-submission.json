@@ -1,0 +1,15 @@
+{
+  "email": "maria.demo@example.com",
+  "answers": {
+    "level": "Intermediate",
+    "goal": "Travel & everyday life",
+    "struggle": "Speaking without freezing",
+    "timeline": "3–6 months",
+    "rhythm": "2 lessons per week",
+    "successText": "Being able to chat with locals when I travel without switching to English",
+    "availability": {
+      "days": ["Tuesday", "Thursday"],
+      "times": ["Evening"]
+    }
+  }
+}

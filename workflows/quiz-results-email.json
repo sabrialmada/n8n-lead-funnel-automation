@@ -1,0 +1,278 @@
+{
+  "name": "Quiz Results Email",
+  "nodes": [
+    {
+      "id": "webhook1",
+      "name": "Quiz Submitted (Webhook)",
+      "webhookId": "f00a6cc1-135f-4e6f-898b-79c3eabde329",
+      "type": "n8n-nodes-base.webhook",
+      "typeVersion": 2.2,
+      "position": [
+        0,
+        0
+      ],
+      "parameters": {
+        "httpMethod": "POST",
+        "path": "quiz-results",
+        "responseMode": "responseNode",
+        "authentication": "headerAuth",
+        "options": {}
+      },
+      "credentials": {
+        "httpHeaderAuth": {
+          "id": "REPLACE_WITH_YOUR_CREDENTIAL",
+          "name": "Webhook Shared Secret"
+        }
+      }
+    },
+    {
+      "id": "code1",
+      "name": "Compute Recommendation & Email",
+      "type": "n8n-nodes-base.code",
+      "typeVersion": 2,
+      "position": [
+        220,
+        0
+      ],
+      "parameters": {
+        "language": "javaScript",
+        "mode": "runOnceForAllItems",
+        "jsCode": "// n8n Code node — \"Compute Recommendation & Email\"\n// Workflow: Quiz Results Email\n// Mode: Run Once for All Items\n//\n// Validates the incoming quiz submission, picks the best-fit lesson plan from\n// the answers, renders a personalized HTML results email, and prepares the CRM\n// contact attributes. Everything downstream reads from this node's output.\n\n// ---------------------------------------------------------------------------\n// Brand / link configuration — replace with your own values when deploying.\n// ---------------------------------------------------------------------------\nconst BRAND = {\n  name: 'Lingua Studio',\n  tutorName: 'Lucía',\n  tagline: 'Online Spanish lessons for adults',\n  logoUrl: 'https://www.example.com/logo-email.png',\n  plansUrl: 'https://www.example.com/pricing',\n  bookingUrl: 'https://cal.com/your-handle/trial-lesson',\n  whatsappUrl: 'https://wa.me/10000000000',\n};\n\n// ---------------------------------------------------------------------------\n// Input validation\n// ---------------------------------------------------------------------------\nconst body = ($input.first().json.body) || $input.first().json || {};\nconst email = body.email;\nconst answers = body.answers || {};\n\nfunction isValidEmail(value) {\n  return typeof value === 'string' && /^[^\\s@]+@[^\\s@]+\\.[^\\s@]+$/.test(value);\n}\n\nif (!isValidEmail(email)) {\n  throw new Error('A valid email is required');\n}\n\nfunction escapeHtml(value) {\n  return String(value ?? '')\n    .replace(/&/g, '&amp;')\n    .replace(/</g, '&lt;')\n    .replace(/>/g, '&gt;')\n    .replace(/\"/g, '&quot;')\n    .replace(/'/g, '&#39;');\n}\n\nfunction capitalizeFirst(text) {\n  const value = String(text || '').trim();\n  return value ? value.charAt(0).toUpperCase() + value.slice(1) : value;\n}\n\n// ---------------------------------------------------------------------------\n// Recommendation rules\n// ---------------------------------------------------------------------------\nconst PRICING_PLANS = [\n  { rhythm: '1 lesson per week', name: 'Steady', weeks: 12, cadence: '1 lesson per week', sessions: 12, price: 'USD 480', label: 'Flexible pace' },\n  { rhythm: '2 lessons per week', name: 'Accelerated', weeks: 8, cadence: '2 lessons per week', sessions: 16, price: 'USD 720', label: 'Most popular', popular: true },\n  { rhythm: '3+ lessons per week', name: 'Intensive', weeks: 8, cadence: '3 lessons per week', sessions: 24, price: 'USD 1,050', label: 'Fast track' },\n];\nconst DEFAULT_PLAN = PRICING_PLANS[1];\n\nconst FOCUS_BY_STRUGGLE = {\n  'Speaking without freezing': 'live speaking practice in low-pressure conversation so you stop freezing up',\n  'Understanding native speakers': 'listening practice with natural, native-speed Spanish',\n  Grammar: 'grammar explained clearly and reinforced through real conversation, not worksheets',\n  Vocabulary: 'vocabulary built around the topics and situations you actually care about',\n  Pronunciation: 'focused pronunciation coaching so you feel confident speaking out loud',\n  'Confidence when speaking': 'consistent, judgment-free speaking practice to build real confidence',\n};\nconst DEFAULT_FOCUS = 'a mix of conversation, grammar, and listening practice tailored to you';\n\nconst GOAL_TEXT = {\n  'Travel & everyday life': 'travel and everyday life',\n  'Work & business': 'work and professional situations',\n  'Moving to a Spanish-speaking country': 'moving to a Spanish-speaking country',\n  'Relationships / family': 'connecting with family and loved ones',\n  'Speak confidently in conversations': 'speaking confidently in everyday conversations',\n};\nconst DEFAULT_GOAL_TEXT = 'your goals';\n\nfunction getRecommendation(answers) {\n  const plan = PRICING_PLANS.find((candidate) => candidate.rhythm === answers.rhythm) || DEFAULT_PLAN;\n  const focus = FOCUS_BY_STRUGGLE[answers.struggle] || DEFAULT_FOCUS;\n  const goalText = answers.goal === 'Other'\n    ? (answers.goalOther || '').trim() || DEFAULT_GOAL_TEXT\n    : GOAL_TEXT[answers.goal] || DEFAULT_GOAL_TEXT;\n  const summary = `Based on your answers, ${plan.name} (${plan.cadence}) is the best fit for ${goalText} — with ${focus}.`;\n  return { plan, planName: plan.name, planCadence: plan.cadence, goalText, focus, summary };\n}\n\nconst recommendation = getRecommendation(answers);\n\nconst PLAN_FEATURES = (plan) => [\n  `${plan.sessions} × 60-minute private lessons`,\n  plan.cadence,\n  'Personalized study plan',\n  'Materials + practice',\n  'Flexible scheduling / reschedule anytime',\n  'Lesson recordings or notes after each class',\n  `Direct chat access with ${BRAND.tutorName} between lessons`,\n];\n\n// ---------------------------------------------------------------------------\n// Email template (table-based layout for Gmail/Outlook compatibility)\n// ---------------------------------------------------------------------------\nfunction buildEmailHtml({ recommendation, answers }) {\n  const { plan } = recommendation;\n  const level = escapeHtml(answers?.level || '—');\n  const mainGoal = escapeHtml(capitalizeFirst(recommendation.goalText));\n  const struggle = escapeHtml(answers?.struggle || '—');\n  const rhythm = escapeHtml(answers?.rhythm || plan.cadence);\n  const successText = escapeHtml((answers?.successText || '').trim());\n  const summary = escapeHtml(recommendation.summary);\n\n  const statCell = (label, value) => `\n    <td class=\"stat-col\" width=\"50%\" valign=\"top\" style=\"padding:6px;\">\n      <table role=\"presentation\" width=\"100%\" cellpadding=\"0\" cellspacing=\"0\" border=\"0\">\n        <tr>\n          <td valign=\"top\" style=\"background:#f5f7fb;border:1px solid #dde3ec;border-radius:12px;padding:14px 16px;\">\n            <p style=\"margin:0 0 4px;font-family:Arial,Helvetica,sans-serif;font-size:11px;font-weight:700;letter-spacing:0.05em;text-transform:uppercase;color:#6b7785;\">${label}</p>\n            <p style=\"margin:0;font-family:Arial,Helvetica,sans-serif;font-size:15px;font-weight:800;color:#1f2a37;\">${value}</p>\n          </td>\n        </tr>\n      </table>\n    </td>`;\n\n  const featureRow = (text) => `\n    <tr>\n      <td style=\"padding:5px 0;font-family:Arial,Helvetica,sans-serif;font-size:14px;color:#3b4654;\">\n        <span style=\"color:#2f6f5c;font-weight:800;margin-right:8px;\">&#10003;</span>${escapeHtml(text)}\n      </td>\n    </tr>`;\n\n  const successBlock = successText\n    ? `\n      <tr>\n        <td style=\"padding:0 32px 28px;\">\n          <table role=\"presentation\" width=\"100%\" cellpadding=\"0\" cellspacing=\"0\" border=\"0\" style=\"background:#eef3fb;border-left:3px solid #4a6fa5;border-radius:8px;\">\n            <tr>\n              <td style=\"padding:16px 18px;font-family:Arial,Helvetica,sans-serif;font-size:14px;line-height:1.6;color:#3b4654;font-style:italic;\">\n                \"${successText}\"\n              </td>\n            </tr>\n          </table>\n        </td>\n      </tr>`\n    : '';\n\n  return `<!DOCTYPE html>\n<html lang=\"en\">\n  <head>\n    <meta charset=\"utf-8\" />\n    <meta name=\"viewport\" content=\"width=device-width, initial-scale=1.0\" />\n    <title>Your personalized Spanish plan</title>\n    <style>\n      @media only screen and (max-width: 480px) {\n        .stat-col {\n          display: block !important;\n          width: 100% !important;\n          box-sizing: border-box !important;\n        }\n      }\n    </style>\n  </head>\n  <body style=\"margin:0;padding:0;background:#eef1f5;\">\n    <div style=\"display:none;max-height:0;overflow:hidden;opacity:0;\">\n      ${summary}\n    </div>\n    <table role=\"presentation\" width=\"100%\" cellpadding=\"0\" cellspacing=\"0\" border=\"0\" style=\"background:#eef1f5;\">\n      <tr>\n        <td align=\"center\" style=\"padding:32px 16px;\">\n          <table role=\"presentation\" width=\"600\" cellpadding=\"0\" cellspacing=\"0\" border=\"0\" style=\"max-width:600px;width:100%;background:#ffffff;border-radius:20px;overflow:hidden;\">\n\n            <tr>\n              <td style=\"background:#f8fafc;padding:20px 32px;\" align=\"center\">\n                <img src=\"${BRAND.logoUrl}\" width=\"150\" alt=\"${escapeHtml(BRAND.name)}\" style=\"display:block;width:150px;max-width:60%;height:auto;border:0;\" />\n              </td>\n            </tr>\n\n            <tr>\n              <td style=\"background:#eef3fb;padding:36px 32px 28px;\">\n                <p style=\"margin:0 0 10px;font-family:Arial,Helvetica,sans-serif;font-size:12px;font-weight:800;letter-spacing:0.06em;text-transform:uppercase;color:#4a6fa5;\">Your results are in</p>\n                <h1 style=\"margin:0 0 14px;font-family:Arial,Helvetica,sans-serif;font-size:24px;line-height:1.3;font-weight:800;color:#1f2a37;\">Your personalized Spanish plan is ready</h1>\n                <p style=\"margin:0;font-family:Arial,Helvetica,sans-serif;font-size:15px;line-height:1.6;color:#3b4654;\">${summary}</p>\n              </td>\n            </tr>\n\n            <tr>\n              <td style=\"padding:28px 32px 8px;\">\n                <p style=\"margin:0 0 12px;font-family:Arial,Helvetica,sans-serif;font-size:12px;font-weight:800;letter-spacing:0.05em;text-transform:uppercase;color:#6b7785;\">Your answers</p>\n                <table role=\"presentation\" width=\"100%\" cellpadding=\"0\" cellspacing=\"0\" border=\"0\">\n                  <tr>\n                    ${statCell('Current level', level)}\n                    ${statCell('Main goal', mainGoal)}\n                  </tr>\n                  <tr>\n                    ${statCell('Biggest challenge', struggle)}\n                    ${statCell('Frequency', rhythm)}\n                  </tr>\n                </table>\n              </td>\n            </tr>\n\n            ${successBlock}\n\n            <tr>\n              <td style=\"padding:12px 32px 8px;\">\n                <table role=\"presentation\" width=\"100%\" cellpadding=\"0\" cellspacing=\"0\" border=\"0\" style=\"border:2px solid #4a6fa5;border-radius:16px;overflow:hidden;\">\n                  <tr>\n                    <td style=\"background:#4a6fa5;padding:10px 20px;font-family:Arial,Helvetica,sans-serif;font-size:12px;font-weight:800;letter-spacing:0.04em;text-transform:uppercase;color:#ffffff;text-align:center;\">\n                      Recommended for you\n                    </td>\n                  </tr>\n                  <tr>\n                    <td style=\"padding:24px 24px 8px;text-align:center;\">\n                      <p style=\"margin:0 0 4px;font-family:Arial,Helvetica,sans-serif;font-size:15px;font-weight:800;letter-spacing:0.03em;text-transform:uppercase;color:#1f2a37;\">${escapeHtml(plan.name)} plan</p>\n                      <p style=\"margin:0 0 14px;font-family:Arial,Helvetica,sans-serif;font-size:13px;font-weight:600;color:#6b7785;\">${plan.weeks}-week program</p>\n                      <p style=\"margin:0 0 18px;font-family:Arial,Helvetica,sans-serif;font-size:32px;font-weight:800;color:#1f2a37;\">${escapeHtml(plan.price)} <span style=\"font-size:14px;font-weight:600;color:#6b7785;\">total</span></p>\n                    </td>\n                  </tr>\n                  <tr>\n                    <td style=\"padding:0 24px 26px;\">\n                      <table role=\"presentation\" width=\"100%\" cellpadding=\"0\" cellspacing=\"0\" border=\"0\">\n                        ${PLAN_FEATURES(plan).map(featureRow).join('')}\n                      </table>\n                    </td>\n                  </tr>\n                  <tr>\n                    <td style=\"padding:0 24px 26px;\" align=\"center\">\n                      <a href=\"${BRAND.bookingUrl}\" style=\"display:inline-block;background:#4a6fa5;color:#ffffff;padding:14px 30px;border-radius:999px;text-decoration:none;font-family:Arial,Helvetica,sans-serif;font-weight:800;font-size:15px;\">\n                        Book your trial lesson\n                      </a>\n                      <br />\n                      <a href=\"${BRAND.plansUrl}\" style=\"display:inline-block;margin-top:14px;color:#4a6fa5;text-decoration:none;font-family:Arial,Helvetica,sans-serif;font-weight:800;font-size:15px;\">\n                        View more plans\n                      </a>\n                    </td>\n                  </tr>\n                </table>\n              </td>\n            </tr>\n\n            <tr>\n              <td style=\"padding:24px 32px 8px;\" align=\"center\">\n                <p style=\"margin:0;font-family:Arial,Helvetica,sans-serif;font-size:13px;color:#6b7785;\">\n                  Have any question? Message me on\n                  <a href=\"${BRAND.whatsappUrl}\" style=\"color:#4a6fa5;font-weight:700;text-decoration:none;\">WhatsApp</a>\n                  or just reply to this email.\n                </p>\n              </td>\n            </tr>\n\n            <tr>\n              <td style=\"padding:28px 32px 32px;border-top:1px solid #dde3ec;margin-top:20px;\">\n                <p style=\"margin:20px 0 0;font-family:Arial,Helvetica,sans-serif;font-size:14px;line-height:1.6;color:#1f2a37;\">\n                  Talk soon,<br /><strong>${escapeHtml(BRAND.tutorName)}</strong>\n                </p>\n                <p style=\"margin:16px 0 0;font-family:Arial,Helvetica,sans-serif;font-size:12px;color:#9aa5b1;\">\n                  ${escapeHtml(BRAND.name)} · ${escapeHtml(BRAND.tagline)}\n                </p>\n              </td>\n            </tr>\n\n          </table>\n        </td>\n      </tr>\n    </table>\n  </body>\n</html>`;\n}\n\nconst emailHtml = buildEmailHtml({ recommendation, answers });\n\n// ---------------------------------------------------------------------------\n// CRM attributes (Brevo contact fields)\n// ---------------------------------------------------------------------------\nconst brevoAttributes = {\n  GOAL: answers.goal === 'Other' ? answers.goalOther : answers.goal,\n  LEVEL: answers.level,\n  STRUGGLE: answers.struggle,\n  TIMELINE: answers.timeline,\n  RHYTHM: answers.rhythm,\n  SUCCESS_TEXT: answers.successText,\n  AVAILABILITY_DAYS: ((answers.availability && answers.availability.days) || []).join(', '),\n  AVAILABILITY_TIMES: ((answers.availability && answers.availability.times) || []).join(', '),\n  RECOMMENDED_PLAN: recommendation.planName,\n};\n\nreturn [{\n  json: {\n    email,\n    answers,\n    answersJson: JSON.stringify(answers),\n    recommendation,\n    emailHtml,\n    brevoAttributes,\n  },\n}];\n"
+      }
+    },
+    {
+      "id": "postgres1",
+      "name": "Save Submission",
+      "type": "n8n-nodes-base.postgres",
+      "typeVersion": 2.7,
+      "position": [
+        440,
+        0
+      ],
+      "parameters": {
+        "operation": "executeQuery",
+        "query": "INSERT INTO quiz_submissions (email, recommended_plan, answers) VALUES ($1, $2, $3::jsonb)",
+        "options": {
+          "queryReplacement": "={{ [$json.email, $json.recommendation.planName, $json.answersJson] }}"
+        }
+      },
+      "credentials": {
+        "postgres": {
+          "id": "REPLACE_WITH_YOUR_CREDENTIAL",
+          "name": "Postgres — Leads DB"
+        }
+      }
+    },
+    {
+      "id": "http1",
+      "name": "Upsert Brevo Contact",
+      "type": "n8n-nodes-base.httpRequest",
+      "typeVersion": 4.5,
+      "position": [
+        660,
+        0
+      ],
+      "parameters": {
+        "method": "POST",
+        "url": "https://api.brevo.com/v3/contacts",
+        "authentication": "genericCredentialType",
+        "genericAuthType": "httpHeaderAuth",
+        "sendHeaders": true,
+        "headerParameters": {
+          "parameters": [
+            {
+              "name": "accept",
+              "value": "application/json"
+            }
+          ]
+        },
+        "sendBody": true,
+        "contentType": "json",
+        "specifyBody": "json",
+        "jsonBody": "={{ { email: $('Compute Recommendation & Email').item.json.email, listIds: [1], updateEnabled: true, attributes: $('Compute Recommendation & Email').item.json.brevoAttributes } }}",
+        "options": {}
+      },
+      "credentials": {
+        "httpHeaderAuth": {
+          "id": "REPLACE_WITH_YOUR_CREDENTIAL",
+          "name": "Brevo API Key"
+        }
+      }
+    },
+    {
+      "id": "http2",
+      "name": "Send Results Email",
+      "type": "n8n-nodes-base.httpRequest",
+      "typeVersion": 4.5,
+      "position": [
+        880,
+        0
+      ],
+      "parameters": {
+        "method": "POST",
+        "url": "https://api.brevo.com/v3/smtp/email",
+        "authentication": "genericCredentialType",
+        "genericAuthType": "httpHeaderAuth",
+        "sendHeaders": true,
+        "headerParameters": {
+          "parameters": [
+            {
+              "name": "accept",
+              "value": "application/json"
+            }
+          ]
+        },
+        "sendBody": true,
+        "contentType": "json",
+        "specifyBody": "json",
+        "jsonBody": "={{ { sender: { email: 'hello@example.com', name: 'Lingua Studio' }, to: [ { email: $('Compute Recommendation & Email').item.json.email } ], subject: 'Your personalized Spanish plan is ready 🎉', htmlContent: $('Compute Recommendation & Email').item.json.emailHtml } }}",
+        "options": {}
+      },
+      "credentials": {
+        "httpHeaderAuth": {
+          "id": "REPLACE_WITH_YOUR_CREDENTIAL",
+          "name": "Brevo API Key"
+        }
+      }
+    },
+    {
+      "id": "respond1",
+      "name": "Respond to Webhook",
+      "type": "n8n-nodes-base.respondToWebhook",
+      "typeVersion": 1.5,
+      "position": [
+        1100,
+        0
+      ],
+      "parameters": {
+        "respondWith": "json",
+        "responseBody": "={{ { ok: true, recommendation: $('Compute Recommendation & Email').item.json.recommendation } }}",
+        "options": {}
+      }
+    },
+    {
+      "id": "crypto1",
+      "name": "Hash Email (SHA256)",
+      "type": "n8n-nodes-base.crypto",
+      "typeVersion": 2,
+      "position": [
+        880,
+        200
+      ],
+      "parameters": {
+        "action": "hash",
+        "type": "SHA256",
+        "value": "={{ $('Compute Recommendation & Email').item.json.email.trim().toLowerCase() }}",
+        "dataPropertyName": "hashedEmail",
+        "encoding": "hex",
+        "binaryData": false
+      }
+    },
+    {
+      "id": "meta1",
+      "name": "Send Meta Lead Event",
+      "type": "n8n-nodes-base.httpRequest",
+      "typeVersion": 4.5,
+      "position": [
+        1100,
+        200
+      ],
+      "parameters": {
+        "method": "POST",
+        "url": "https://graph.facebook.com/v21.0/YOUR_PIXEL_ID/events",
+        "authentication": "genericCredentialType",
+        "genericAuthType": "httpQueryAuth",
+        "sendBody": true,
+        "contentType": "json",
+        "specifyBody": "json",
+        "jsonBody": "={{ { data: [ { event_name: 'Lead', event_time: Math.floor(Date.now()/1000), event_id: $execution.id, event_source_url: 'https://www.example.com/quiz', action_source: 'website', user_data: { em: [ $json.hashedEmail ] } } ] } }}",
+        "options": {}
+      },
+      "credentials": {
+        "httpQueryAuth": {
+          "id": "REPLACE_WITH_YOUR_CREDENTIAL",
+          "name": "Meta CAPI Access Token"
+        }
+      }
+    }
+  ],
+  "connections": {
+    "Quiz Submitted (Webhook)": {
+      "main": [
+        [
+          {
+            "node": "Compute Recommendation & Email",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "Compute Recommendation & Email": {
+      "main": [
+        [
+          {
+            "node": "Save Submission",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "Save Submission": {
+      "main": [
+        [
+          {
+            "node": "Upsert Brevo Contact",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "Upsert Brevo Contact": {
+      "main": [
+        [
+          {
+            "node": "Send Results Email",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "Send Results Email": {
+      "main": [
+        [
+          {
+            "node": "Respond to Webhook",
+            "type": "main",
+            "index": 0
+          },
+          {
+            "node": "Hash Email (SHA256)",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "Hash Email (SHA256)": {
+      "main": [
+        [
+          {
+            "node": "Send Meta Lead Event",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    }
+  },
+  "settings": {
+    "executionOrder": "v1",
+    "saveDataErrorExecution": "all",
+    "saveDataSuccessExecution": "all",
+    "saveManualExecutions": true
+  }
+}
