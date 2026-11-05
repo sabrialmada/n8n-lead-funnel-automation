@@ -68,6 +68,10 @@ flowchart LR
 
 [`workflows/quiz-results-email.json`](workflows/quiz-results-email.json)
 
+![n8n execution view of the Quiz Results Email workflow, with all 8 nodes completed successfully](docs/images/quiz-results-run.png)
+
+*Successful end-to-end test run: all 8 steps completed in 2.7 seconds.*
+
 | Step | Node | What it does |
 |---|---|---|
 | 1 | Webhook (header-auth) | Receives the quiz submission; rejects requests without the shared secret |
@@ -85,6 +89,12 @@ also provided as a readable file:
 ### Workflow 2 — Leads Dashboard Backend (12 nodes)
 
 [`workflows/leads-dashboard-backend.json`](workflows/leads-dashboard-backend.json)
+
+![n8n execution view of the Leads Dashboard Backend workflow, with the follow-up path completed successfully](docs/images/leads-follow-up-run.png)
+
+*Successful test run of the follow-up endpoint with a disposable test lead. The
+green path ran. The grey nodes are the separate list endpoint and the
+"not found" response, which this request didn't trigger.*
 
 Two authenticated endpoints in one workflow:
 
@@ -176,7 +186,7 @@ workflows/
   code-nodes/                      # Code-node source + email template, readable
 database/schema.sql                # table used by both workflows
 examples/                          # sample request/response payloads
-docs/                              # API reference + infrastructure write-up
+docs/                              # API reference, infrastructure write-up, screenshots
 infra/                             # anonymized Compose + Caddy config, example backup script
 ```
 
