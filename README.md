@@ -1,14 +1,19 @@
 # Lead Funnel Automation on Self-Hosted n8n
 
-A production n8n automation platform I designed, deployed and secured for a
-client — an online language-tutoring business that gets its leads from paid
-ads and a quiz funnel. This repository is an **anonymized case study**: the
-workflows are the real ones running in production, with the client's brand,
-contact details, IDs and pricing replaced by placeholders (shown here as
-the fictional *"Lingua Studio"*).
+A self-hosted n8n automation platform I deployed and secured for a client — an
+online language-tutoring business that gets its leads from paid ads and a quiz
+funnel. This repository is an **anonymized case study**: the workflows are the
+real ones from the client's n8n instance, with the brand, contact details, IDs
+and pricing replaced by placeholders (shown here as the fictional
+*"Lingua Studio"*).
 
 > Shared with the client's permission. No credentials, customer data or
 > identifying business details are included.
+
+**Status:** both workflows are active on the n8n server and were tested end to
+end against the real services. They reproduce the existing serverless backend
+and run in parallel with it. The live website and dashboard still use that
+backend, and switching them over to n8n is a separate future step.
 
 ---
 
@@ -25,14 +30,17 @@ recommendation by email. The business needed:
 3. A **leads dashboard backend**: list every lead and send a one-click,
    personal follow-up email to the ones who haven't booked yet, without
    double-sending.
-4. All of it on infrastructure the business owns, with backups and a security
-   posture they can trust.
+4. All of it on a self-hosted server with hardened access and daily workflow
+   backups.
 
 ## The solution
 
+Dotted arrows show the intended callers. The endpoints are built and tested,
+but the live site and dashboard are not connected to them yet.
+
 ```mermaid
 flowchart LR
-    Q[Quiz funnel<br/>website] -- POST + secret header --> W1
+    Q[Quiz funnel<br/>website] -. "POST + secret header" .-> W1
 
     subgraph n8n["Self-hosted n8n"]
       direction LR
@@ -45,8 +53,8 @@ flowchart LR
       H --> M[Meta CAPI<br/>Lead event]
     end
 
-    A[Admin<br/>dashboard] -- GET /leads-list --> W2
-    A -- POST /leads-send-follow-up --> W3
+    A[Admin<br/>dashboard] -. "GET /leads-list" .-> W2
+    A -. "POST /leads-send-follow-up" .-> W3
 
     subgraph n8n2["Self-hosted n8n"]
       W2[Webhook] --> L[(List leads)] --> R2[Respond JSON]
@@ -67,8 +75,8 @@ flowchart LR
 | 3 | Postgres | Inserts the submission (`answers` stored as JSONB) with parameterized SQL |
 | 4 | HTTP → Brevo | Upserts the contact into the CRM list with all quiz answers as attributes |
 | 5 | HTTP → Brevo | Sends the transactional results email |
-| 6 | Respond to Webhook | Returns the recommendation to the website so it can render the results page |
-| 7–8 | Crypto → HTTP → Meta | SHA-256 hashes the normalized email and sends a server-side `Lead` event to the Conversions API, using the n8n execution id as `event_id` for deduplication |
+| 6 | Respond to Webhook | Returns the recommendation to the caller as JSON |
+| 7–8 | Crypto → HTTP → Meta | SHA-256 hashes the normalized email and sends a server-side `Lead` event to the Conversions API, with the n8n execution id as `event_id` |
 
 The recommendation logic and email template live in a single Code node,
 also provided as a readable file:
@@ -92,9 +100,9 @@ See [`docs/api.md`](docs/api.md) for request/response examples.
 
 ## Engineering decisions
 
-- **Self-hosted, not n8n Cloud.** The business owns its data and
-  automation history; running costs are a small fixed VPS bill instead of
-  per-execution pricing.
+- **Self-hosted, with Postgres instead of SQLite.** Workflows, execution
+  history and server configuration stay under direct control, on a fixed-size
+  VPS with headroom to grow.
 - **Every webhook is authenticated** with a header secret stored as an n8n
   credential — verified by testing that unauthenticated requests are rejected.
 - **Parameterized SQL everywhere** (`$1, $2…` with `queryReplacement`) — no
@@ -103,14 +111,13 @@ See [`docs/api.md`](docs/api.md) for request/response examples.
   id is type-checked before anything is written or sent.
 - **Privacy-preserving ad attribution.** Emails are normalized and SHA-256
   hashed before leaving the system, as Meta's CAPI requires.
-- **Run in parallel with production before cut-over.** Both workflows were
-  built as faithful replicas of the existing serverless backend and tested
-  end-to-end against the real systems (with disposable test leads, cleaned
-  up afterwards) without touching the live site.
-- **Validated before deploy.** Workflows were built with schema-aware n8n
-  tooling and validated for structure, connections and expressions before
-  being activated. Two bugs (a strict type-match in the IF node and a wrong
-  response code) were caught in testing and fixed before go-live.
+- **Built alongside production, not on top of it.** Both workflows replicate
+  the existing serverless backend and were tested end-to-end against the real
+  systems (with disposable test leads, cleaned up afterwards) without touching
+  the live site.
+- **Checked and tested before being called done.** Workflows were built with
+  schema-aware n8n tooling and reviewed for configuration errors. Testing caught
+  two bugs (a type-matching issue and a wrong response code), which were fixed.
 - **Credentials never live in workflow JSON.** Exports only reference
   credentials by name, so workflow files are safe to version-control.
 
@@ -120,21 +127,21 @@ See [`docs/api.md`](docs/api.md) for request/response examples.
 |---|---|
 | Host | Hetzner Cloud VPS (2 vCPU / 4 GB), EU region, Ubuntu LTS |
 | Runtime | Docker Compose: n8n + PostgreSQL 17 + Caddy |
-| TLS | Caddy with automatic Let's Encrypt certificates |
+| TLS | Caddy with automatic HTTPS certificates |
 | Hardening | SSH key-only auth, root login disabled, non-root deploy user, UFW (22/80/443 only), fail2ban |
-| Network | n8n and Postgres only reachable on the internal Docker network; Caddy is the sole public entry point |
-| Backups | Daily cron exports every workflow to a private Git repo via a write-only, repo-scoped deploy key — credentials are never exported |
+| Network | n8n and Postgres publish no ports; Caddy is the sole public entry point |
+| Backups | Daily cron exports every workflow to a private Git repo via a repo-scoped deploy key — credentials are never exported |
 | App database | Managed Postgres (Neon) shared with the website, `quiz_submissions` table |
 | Email / CRM | Brevo (contacts API + transactional email) |
 
 Details: [`docs/infrastructure.md`](docs/infrastructure.md) ·
-reference templates in [`infra/`](infra/).
+anonymized server config in [`infra/`](infra/).
 
 ---
 
 ## Run it yourself
 
-1. Start n8n (or use the template in [`infra/`](infra/)).
+1. Start n8n (or use the Compose setup in [`infra/`](infra/)).
 2. Create the table: [`database/schema.sql`](database/schema.sql).
 3. In n8n, create these credentials:
 
@@ -170,11 +177,12 @@ workflows/
 database/schema.sql                # table used by both workflows
 examples/                          # sample request/response payloads
 docs/                              # API reference + infrastructure write-up
-infra/                             # reference Docker Compose / Caddy / backup templates
+infra/                             # anonymized Compose + Caddy config, example backup script
 ```
 
 ## Possible next steps
 
+- Connect the live quiz and admin dashboard to these endpoints.
 - Error-trigger workflow that alerts on any failed execution (Slack/email).
 - Retry with backoff on the Brevo and Meta HTTP nodes.
 - Automatic follow-up after N days without a booking, using the existing

@@ -1,7 +1,7 @@
 # Webhook API
 
 All endpoints require the shared-secret header configured in the matching
-n8n Header Auth credential. Requests without it receive `403`.
+n8n Header Auth credential. Requests without it are rejected.
 
 The header name below (`X-Webhook-Secret`) is an example: use whatever name
 you configure in the credential.

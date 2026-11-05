@@ -1,21 +1,20 @@
-# Reference template for the stack described in docs/infrastructure.md.
-# Production values live in a server-side .env file that is never committed.
+# The Compose file from the running server, with the timezone anonymized.
+# Secrets come from a server-side .env file that is never committed.
 services:
   postgres:
-    image: postgres:17
+    image: postgres:17-alpine
     restart: unless-stopped
     environment:
-      POSTGRES_USER: ${POSTGRES_USER}
+      POSTGRES_USER: n8n
       POSTGRES_PASSWORD: ${POSTGRES_PASSWORD}
-      POSTGRES_DB: ${POSTGRES_DB}
+      POSTGRES_DB: n8n
     volumes:
       - postgres_data:/var/lib/postgresql/data
     healthcheck:
-      test: ["CMD-SHELL", "pg_isready -U ${POSTGRES_USER} -d ${POSTGRES_DB}"]
-      interval: 10s
+      test: ["CMD-SHELL", "pg_isready -U n8n"]
+      interval: 5s
       timeout: 5s
-      retries: 5
-    networks: [internal]
+      retries: 10
 
   n8n:
     image: docker.n8n.io/n8nio/n8n:latest
@@ -26,43 +25,41 @@ services:
     environment:
       DB_TYPE: postgresdb
       DB_POSTGRESDB_HOST: postgres
-      DB_POSTGRESDB_DATABASE: ${POSTGRES_DB}
-      DB_POSTGRESDB_USER: ${POSTGRES_USER}
+      DB_POSTGRESDB_PORT: 5432
+      DB_POSTGRESDB_DATABASE: n8n
+      DB_POSTGRESDB_USER: n8n
       DB_POSTGRESDB_PASSWORD: ${POSTGRES_PASSWORD}
       N8N_ENCRYPTION_KEY: ${N8N_ENCRYPTION_KEY}
       N8N_HOST: ${N8N_HOST}
       N8N_PROTOCOL: https
       N8N_PORT: 5678
       WEBHOOK_URL: https://${N8N_HOST}/
-      GENERIC_TIMEZONE: ${GENERIC_TIMEZONE}
+      N8N_EDITOR_BASE_URL: https://${N8N_HOST}/
       N8N_SECURE_COOKIE: "true"
-      N8N_DIAGNOSTICS_ENABLED: "false"
-      EXECUTIONS_DATA_PRUNE: "true"
-      EXECUTIONS_DATA_MAX_AGE: 336
+      N8N_PROXY_HOPS: 1
+      GENERIC_TIMEZONE: UTC
+      N8N_RUNNERS_ENABLED: "true"
     volumes:
       - n8n_data:/home/node/.n8n
-    networks: [internal]
+      - ./backup_export:/backup
+    expose:
+      - "5678"
 
   caddy:
-    image: caddy:2
+    image: caddy:2-alpine
     restart: unless-stopped
     ports:
       - "80:80"
       - "443:443"
-    environment:
-      N8N_HOST: ${N8N_HOST}
     volumes:
-      - ./Caddyfile:/etc/caddy/Caddyfile:ro
+      - ./Caddyfile:/etc/caddy/Caddyfile
       - caddy_data:/data
       - caddy_config:/config
-    depends_on: [n8n]
-    networks: [internal]
+    depends_on:
+      - n8n
 
 volumes:
   postgres_data:
   n8n_data:
   caddy_data:
   caddy_config:
-
-networks:
-  internal:
